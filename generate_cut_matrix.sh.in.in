@@ -1,0 +1,32 @@
+#!@GNUBASH@
+
+# Footprint Pipeline.
+#
+# Copyright © 2017 Aslihan Karabacak <Aslihan.Karabacak@mdc-berlin.de>
+#
+# This file is part of the Footprint Pipeline.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+set -e
+set -u
+
+libexecdir="${FOOTPRINT_UNINSTALLED:-#:MAKE}"
+
+sorted_1bp_bam=$1
+coords_25bp_cut_matrix=$2
+factor_name=$3
+
+@COVERAGEBED@ -d -abam $sorted_1bp_bam -b $coords_25bp_cut_matrix > $sorted_1bp_bam.$factor_name.cov_d
+@RSCRIPT@ ${libexecdir}/get_cut_matrix.R $sorted_1bp_bam.$factor_name.cov_d $coords_25bp_cut_matrix $sorted_1bp_bam.$factor_name.cut_matrix

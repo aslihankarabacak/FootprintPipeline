@@ -1,0 +1,52 @@
+#!@RSCRIPT@
+
+# Footprint Pipeline.
+#
+# Copyright © 2017 Aslihan Karabacak <Aslihan.Karabacak@mdc-berlin.de>
+#
+# This file is part of the Footprint Pipeline.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#usage Rscript running_script_fp.R bias_file cut_matrix motif_coords peak_file fasta_file plot1_name.png plot2_name.png result_file_name parameter_file_name
+ 
+args <- commandArgs(trailingOnly = TRUE)
+
+library(GenomicRanges);
+library(gtools);
+library(mixtools);
+
+#:MAKE;
+source(paste(libexecdir,"MixtureModel.r",sep = "/"));
+
+BiasFile <- args[1];
+outSignal <- args[2];
+c <- read.table(args[3]);
+b <- read.table(args[4]);
+p <- read.table(args[5]);
+k <- as.numeric(args[11]);
+
+m <- MultMMixture_Full("Cell","Factor",TF_Bed=b,Cuts=c,peakbed=p,Plot=T,PadLen=25,k=k,ReturnPar=T,Fixed=as.logical(args[13]),Background=args[12],FastaName=args[6],dest1=args[7],dest2=args[8]);
+
+if(k==2){
+results <- cbind(b,m$llr,m$z,".")
+write.table(results,args[9],sep="\t",quote=F,row.names=F,col.names=c("chr","start","end","name","score","strand","llr","z1","z2","z3"))
+} else if(k==3) {
+results <- cbind(b,m$llr,m$z)
+write.table(results,args[9],sep="\t",quote=F,row.names=F,col.names=c("chr","start","end","name","score","strand","llr","z1","z2","z3"))
+} else {
+print("Number of components, k, has not been specified correctly, please set 2 or 3.", quote=F)
+}
+
+write.table(m$par$theta,args[10],sep="\t",quote=F,row.names=F,col.names=F)

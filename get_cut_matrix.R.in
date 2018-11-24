@@ -1,0 +1,47 @@
+#!@RSCRIPT@
+
+# Footprint Pipeline.
+#
+# Copyright © 2017 Aslihan Karabacak <Aslihan.Karabacak@mdc-berlin.de>
+#
+# This file is part of the Footprint Pipeline.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#usage Rscript get_cut_matrix.R path_to_1bp_res_counts_file path_to_bed_file output_file_name
+
+args <- commandArgs(trailingOnly = TRUE)
+
+counts_file <- read.table(args[1], col.names=c("chr","start","end","name","score","strand","pos","count"),stringsAsFactors=F)
+print("counts imported")
+bed_file <- read.table(args[2], col.names=c("chr","start","end","name","score","strand"),stringsAsFactors=F)
+print("bed imported")
+
+results <- vector()
+counts <- vector()
+idx <- vector()
+
+for(i in 1:length(bed_file$start)){
+  idx <- which(counts_file$start==bed_file$start[i] & counts_file$chr==bed_file$chr[i] & counts_file$strand==bed_file$strand[i])
+  counts <- counts_file$count[idx]
+  if(bed_file$strand[i]=="+"){
+    results <- rbind(results, counts)
+  } else if(bed_file$strand[i]=="-"){
+    results <- rbind(results, rev(counts))  
+  } else {
+    stop("Strand mistake")
+  }   
+}
+
+write.table(results,args[3],sep="\t",quote=F,row.names=F,col.names=F)

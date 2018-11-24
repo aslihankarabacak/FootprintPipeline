@@ -1,0 +1,42 @@
+# Installation
+
+This package uses the GNU build system.  If you build using the
+sources from a release tarball all you need is to follow these steps:
+
+- Change into the pipeline's directory and configure
+	cd footprint-pipeline-1.0.1
+	./configure --prefix=/tmp/my-test
+
+Note: If the necessary executables are not in the path, or their versions are incompatible with the pipeline, the full paths of the correct executables can be specified for the configuration. See below an example containing all BEDTools executables used by the pipeline, alongside SAMtools:
+./configure COVERAGEBED=/path/to/coverageBed FASTAFROMBED=/path/to/fastaFromBed BAMTOBED=/path/to/bamToBed BEDTOBAM=/path/to/bedToBam BEDTOOLS=/path/to/bedtools SAMTOOLS=/path/to/samtools --prefix=/tmp/my-test
+
+- After configuration, make, run the test and install
+	make
+	make check
+	make install
+
+Note: This will install the pipeline to /tmp/my-test directory. This can be changed by supplying the desired directory to the --prefix argument in the configuration step. Run ./configure --help to see all arguments.
+
+
+
+# Releases
+
+Releases are made by the core developers only.  This section describes
+the release process.
+
+- Any new release tarball should have a unique version number.  This
+  is achieved by updating the version string in the `VERSION` file.
+
+- Regenerate the build system files by running `./bootstrap.sh &&
+  ./configure`.
+
+- Run the tests and build a new tarball.  Since we are using
+  Autotools, we can run the test suite and generate a new release
+  tarball with  `make distcheck`.
+
+- Once the tests pass and you are sure to make the release, create a
+  new signed tag with `git tag --sign v$(cat VERSION)`.
+
+- Sign the release tarball with GPG to create a detached signature.
+
+- Upload the tarball and the detached signature.

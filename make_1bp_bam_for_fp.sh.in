@@ -1,0 +1,48 @@
+#!@GNUBASH@
+
+# Footprint Pipeline.
+#
+# Copyright © 2017 Aslihan Karabacak <Aslihan.Karabacak@mdc-berlin.de>
+#
+# This file is part of the Footprint Pipeline.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+#example:
+#bash make_1bp_bam.sh initial_bam_file chrom_sizes_file
+
+set -e
+set -u
+
+bam_file=$1
+chrom_sizes=$2
+
+echo -n "Converting bam to bed and processing bed..."
+@BAMTOBED@ -i $bam_file > $bam_file.bed
+@AWK@ 'OFS="\t" {if($6=="+") print $1,$2,$2+1,$4,$5,$6}' $bam_file.bed > $bam_file.bed.part1
+@AWK@ 'OFS="\t" {if($6=="-") print $1,$3-1,$3,$4,$5,$6}' $bam_file.bed > $bam_file.bed.part2
+cat $bam_file.bed.part1 $bam_file.bed.part2 | sort -k1,1 -k2,2n > $bam_file.1bp.bed
+echo "Done!"
+
+echo -n "Generating and sorting bam file..."
+@SAMTOOLS@ sort <(@BEDTOBAM@ -i $bam_file.1bp.bed -g $chrom_sizes) $bam_file.1bp.sorted
+@SAMTOOLS@ index $bam_file.1bp.sorted.bam
+echo "Done!"
+
+echo -n "Removing intermediate files..."
+rm $bam_file.bed
+rm $bam_file.bed.part1
+rm $bam_file.bed.part2
+rm $bam_file.1bp.bed
+echo "Done!"

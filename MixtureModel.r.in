@@ -1,0 +1,442 @@
+# Footprint Pipeline.
+#
+# Copyright © 2017 Galip Gurkan Yardimci, Aslihan Karabacak <Aslihan.Karabacak@mdc-berlin.de>
+#
+# This file is part of the Footprint Pipeline.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+MultMTrain <- function(Cuts,Iterations=1,Plot=F )
+{
+	BPar <- colSums(Cuts) / sum(Cuts);
+	UPar <- rep ( 1 / ncol(Cuts), ncol(Cuts) );
+	if ( Plot )
+	{
+		plot(x=c(1:length(BPar)),y=BPar,col="blue",type="l"); lines(x=c(1:length(UPar)),y=UPar,col="red"); title(main="before");
+	}
+	if ( Iterations > 1 )
+	{
+		for ( i in 2:Iterations )
+		{
+			llr <- MultMEvaluate(Cuts,list(BPar=BPar,UPar=UPar));
+			Subset <- which(llr>0);
+			Cuts <- Cuts[Subset,];
+			BPar <- colSums(Cuts) / sum(Cuts);
+		}
+	}
+	if ( Plot )
+	{
+		plot(x=c(1:length(BPar)),y=BPar,col="blue",type="l"); lines(x=c(1:length(UPar)),y=UPar,col="red"); title(main="after");
+	}
+	return ( list(BPar=BPar,UPar=UPar) );
+}
+
+MultMEvaluate <- function(Cuts, Par, Prob = F )
+{
+	if ( sum(names(Par)[1:2] == c("BPar","UPar")) == 2 )
+	{	
+		BLV <- apply(Cuts,1,dmultinom,prob=Par$BPar);
+		ULV <- apply(Cuts,1,dmultinom,prob=Par$UPar);
+		LLR <- ( 2 * log(BLV) - 2 * log(ULV) );
+	}
+	else
+	{
+		z <- c();
+		for ( j in 1:(nrow(Par$theta)) )
+		{
+			z <- cbind( z, apply(as.matrix(Cuts),1,dmultinom,prob=Par$theta[j,]) );
+		}
+		z <- z / rowSums(z);
+		
+		flatTheta <- Par$UI;
+		fpTheta <- setdiff(c(1:nrow(Par$theta)),flatTheta);
+
+		if ( ! Prob )
+		{
+			if ( nrow(Par$theta) > 2 )
+			{	llr <- rowSums(z[,fpTheta]) / z[,flatTheta];
+				llr[which(llr==Inf)] <- .Machine$double.xmax;
+			} 
+			else
+			{	
+				llr <- z[,fpTheta] / z[,flatTheta];
+				llr[which(llr==Inf)] <- .Machine$double.xmax;
+			}
+			LLR <- log(llr);
+		}
+		else
+		{
+			llr <- z[,flatTheta] / rowSums(z);	
+			LLR <- 1 - llr;	
+		}
+		
+
+	}
+	LLR[which(LLR==Inf)] <- .Machine$double.xmax;
+	LLR[which(LLR==-Inf)] <- .Machine$double.xmin;
+	LLR[is.na(LLR)] <- 0;
+	
+	return(LLR);
+}
+
+MultMLikelihood <- function(Cuts, Par )
+{
+	LV <- apply(Cuts,1,dmultinom,prob=Par);
+	return ( sum ( log(LV) ) );
+}
+
+
+
+MultMMixture_Full <- function( CL, TF, TF_Bed=c(), Cuts=c(), PadLen=0, Collapse=TRUE, Pos_Ind=c(), 
+	DHS_Ind=c(), Neg_Ind=c(), ReturnPar = F, peakbed=c(), PeakName="", Iterations = 1, Plot = F, k = 2, S = "", 
+	ParCollapse = FALSE, Fixed = FALSE, Background = "Flat", Clear = F, MixType = "DHS", Strand = "B", FastaName = "" ,dest1,dest2 )
+{
+	if ( is.null(TF_Bed) )
+	{
+		TF_Bed <- GetBed(TF,HssBed=paste(CL,".HSS",sep="") );
+	}
+	TF_Len <- TF_Bed[1,3] - TF_Bed[1,2] + 1;
+	if ( PadLen == 0 )
+	{
+		PadLen = TF_Bed[1,3] - TF_Bed[1,2] + 1;
+	}
+	if ( is.null(Cuts) )
+	{
+		Cuts <- GetCuts(CL,TF,Collapse=Collapse,PadLen=PadLen,Strand=Strand);
+	}
+	if ( is.null(peakbed) )
+	{
+		peakbed <- GetBed(PeakName)
+	}
+	
+	
+	if ( is.null(Pos_Ind) )
+	{
+		Pos_Ind <- unique((IntersectBeds(TF_Bed,peakbed))[,1]);
+	}
+	if ( is.null(Neg_Ind) )
+	{
+		Neg_Ind <- setdiff( c(1:nrow(TF_Bed)), Pos_Ind );
+	}
+	#Initialize
+
+	if ( length(Pos_Ind) < 1 )
+	{	print("ChIP intersect fail, pos");	}
+	if ( length(Neg_Ind) < 1 )
+	{	print("ChIP intersect fail, neg");	}
+
+	Init_T <- c();
+	Sep_I <- sample(c(1:(k-1)),length(Pos_Ind),replace=T);
+	for ( i in 1:(k-1) )
+	{
+		Init_T <- rbind(Init_T,MultMTrain(Cuts[Pos_Ind[Sep_I==i],])$BPar); 
+	}
+	if ( Background == "Flat" )
+	{
+		Init_T <- rbind(Init_T,rep(1/ncol(Cuts),ncol(Cuts)) ); 
+	}
+	if ( Background == "Seq" )
+	{
+		Init_T <- rbind(Init_T,as.numeric(BuildSeqBiasBackground(FastaName)) );
+	}
+	if ( Background == "Naked" )
+	{
+		Init_T <- rbind(Init_T,MultMFull_Train("K562_Naked",TF,PadLen=PadLen,PeakName=PeakName,Collapse=Collapse)$BPar);
+	}
+	
+	if ( Plot )
+	{
+		png(filename=dest1,width=12,height=12,units="in",res=300);
+		par(mfrow=c(2,1));
+		plot(x=c(1:ncol(Cuts)),y=Init_T[1,],type="l",col=2,ylim=c(min(Init_T),max(Init_T)),
+			xlab="",ylab="", lwd = 2, main="Before training");
+		legend("topleft",paste("Component",c(1:k)),lwd=rep(2,k),col=c(2:(k+1))); 
+
+		abline(v=c((PadLen+1),(ncol(Cuts)-PadLen)));
+		
+		for ( i in 2:k )
+		{
+			lines(x=c(1:ncol(Cuts)),y=Init_T[i,],type="l",col=i+1,lwd=2);
+		}	
+	}
+	if ( Fixed )
+	{
+		M <- MultMixture(Cuts[c(Pos_Ind,Neg_Ind),],t=Init_T,k=k, fixed=c(rep(FALSE,k-1),TRUE));
+		flatTheta <- k;
+	}
+	else
+	{
+		M <- MultMixtureFast(Cuts[c(Pos_Ind,Neg_Ind),],t=Init_T,k=k);
+		TFBSmass <- rowSums( M$theta[, (PadLen+1):(ncol(Cuts)-PadLen)])
+		flatTheta <- order(TFBSmass,decreasing=T)[1];
+	}
+	
+
+	if ( Plot )
+	{
+		plot(x=c(1:ncol(Cuts)),y=M$theta[1,],type="l",col=2,ylim=c(min(M$theta),max(M$theta)),
+			xlab="",ylab="", lwd = 2, main="After training");
+		legend("topleft",paste("Component",c(1:k)),lwd=rep(2,k),col=c(2:(k+1)));
+		abline(v=c((PadLen+1),(ncol(Cuts)-PadLen)));
+		for ( i in 2:k )
+		{
+			lines(x=c(1:ncol(Cuts)),y=M$theta[i,],type="l",col=i+1,lwd=2);
+		}	
+		dev.off();
+	}
+
+	
+	if ( ParCollapse == FALSE )
+	{
+		z <- c();
+		for ( j in 1:k )
+		{
+			z <- cbind( z, apply(as.matrix(Cuts),1,dmultinom,prob=M$theta[j,]) );
+		}
+		
+		z <- z / rowSums(z);
+		fpTheta <- setdiff(c(1:k),flatTheta)
+		if ( k > 2 )
+		{	llr <- rowSums(z[,fpTheta]) / z[,flatTheta];	} 
+		else
+		{	llr <- z[,fpTheta] / z[,flatTheta];	}
+
+		llr[is.na(llr)] <- 0; 
+		llr[which(llr==Inf)] <- .Machine$double.xmax;
+		llr[which(llr==-Inf)] <- .Machine$double.xmin;
+
+		llr <- log(llr);
+
+		llr[which(llr==Inf)] <- .Machine$double.xmax;
+		llr[which(llr==-Inf)] <- .Machine$double.xmin;
+
+
+	}
+	else
+	{
+		z <- c();
+		newTheta <- M$theta[1:2,]; 
+		fpTheta <- setdiff(c(1:k),flatTheta)
+		sumTheta <- rep(0,ncol(M$theta));
+		for ( i in 1:length(fpTheta) )
+		{
+			sumTheta <- sumTheta + M$theta[fpTheta[i],] * M$lambda[fpTheta[i]]; 
+		}
+		sumTheta <- sumTheta / sum(M$lambda[fpTheta]);
+		newTheta[1,] <- sumTheta;
+		newTheta[2,] <- M$theta[flatTheta,]
+		M$theta <- newTheta;
+		flatTheta <- 2;
+		z <- cbind( z, apply(as.matrix(Cuts),1,dmultinom,prob=M$theta[1,]) );
+		z <- cbind( z, apply(as.matrix(Cuts),1,dmultinom,prob=M$theta[2,]) );
+
+		z <- z / rowSums(z);
+		
+		llr <- z[,1] / z[,2];
+		llr[is.na(llr)] <- 0;
+		llr[which(llr==Inf)] <- .Machine$double.xmax;
+		llr[which(llr==-Inf)] <- .Machine$double.xmin;
+
+
+		llr <- log(llr);
+		llr[which(llr==Inf)] <- .Machine$double.xmax;
+		llr[which(llr==-Inf)] <- .Machine$double.xmin;
+
+
+	}
+
+	if ( Plot )
+	{       
+		fp_plot <- setdiff(c(1:nrow(M$theta)),flatTheta) 
+		sum_plot <- rep(0,ncol(M$theta)); 
+		for ( i in 1:length(fp_plot) )
+                {
+                 	sum_plot <- sum_plot + M$theta[fp_plot[i],] * M$lambda[fp_plot[i]]; 
+                }
+		sum_plot <- sum_plot / sum(M$lambda[fp_plot]); 
+
+		png(filename=dest2,width=12,height=12,units="in",res=300);
+		plot(x=c(1:ncol(Cuts)),y=sum_plot
+			,type="l",ylim=c(min(sum_plot,M$theta[flatTheta,]),max(sum_plot,M$theta[flatTheta,])),
+			main="Final footprint model",xlab="",ylab="", lwd=2, col=2 );
+		legend("topleft",c("Footprint","Background"),lwd=c(2,2),col=c(2,3)); 
+		abline(v=c((PadLen+1),(ncol(Cuts)-PadLen)));
+		lines(x=c(1:ncol(Cuts)),y=M$theta[flatTheta,],type="l",col=3,lwd=2);
+		dev.off();
+	}
+
+
+	pars <- list(theta=M$theta,UI=flatTheta,loglik=M$loglik);
+	if ( ReturnPar )
+	{	return(list(par=pars,llr=llr,z=z));	}
+	else
+	{	return(llr);	}
+
+}
+
+
+MultMixtureFast <- function(Cuts, k = 2, a = c(), t = c() )
+{
+	Zsize <- nrow(Cuts);
+	Xsum <- rowSums(Cuts);
+	X <- Cuts;
+	Mix <- multmixEM(as.matrix(Cuts),k=k,theta=t,lambda=a);
+	BIC <- -2 * Mix$loglik + ( ( length(Mix$theta) - k ) + ( k - 1 ) ) * log(nrow(Cuts));
+	return(list(theta=Mix$theta,loglik=Mix$loglik,BIC=BIC,lambda=Mix$lambda));
+
+}
+
+
+MultMixture <- function(Cuts, k = 2, a = c(), t = c(), fixed = c() )
+{
+	Zsize <- nrow(Cuts);
+	Xsum <- rowSums(Cuts);
+	X <- Cuts;
+	Data <- list();
+
+	if ( is.null(fixed) )
+	{
+		fixed = rep(FALSE,k);
+	}
+	if ( is.null(a) )
+	{
+		a <- rdirichlet(1,rep(1,k)); 
+	}
+	
+	if ( is.null(t) )
+	{	
+		z <- sample(c(1:k),Zsize,replace=T);
+		for ( i in 1:k )
+		{
+			t <- rbind(t, MultMTrain( X[which(z==i),] )$BPar );
+		}
+	}
+	#Check for any "bad" samples
+
+	z <- c();
+	for ( j in 1:k )
+	{
+		z <- cbind(z,apply(X,1,dmultinom,prob=t[j,]));
+	}
+	Zero_I <- which(rowSums(z)==0);
+	#delete those points
+	if ( length(Zero_I) > 0 )
+	{
+		print(paste("Removed" , length(Zero_I), "irregular samples"));
+		X[Zero_I,] <- rep(0,ncol(Cuts)); 
+	}
+	z <- z / rowSums(z);
+	
+
+	Loglik <- c();		
+	for ( j in 1:k )
+	{
+		Loglik <- cbind(Loglik, a[j] * apply(X,1,dmultinom,prob=t[j,]) );
+	}
+	Loglik <- sum(log(rowSums(Loglik)));
+
+
+
+
+	flag <- TRUE;
+	I <- 1;
+	epsilon <- 1e-08;
+	while ( flag )
+	{
+		z <- c();
+		
+		for ( j in 1:k )
+		{
+			z <- cbind(z, a[j] * apply(X,1,dmultinom,prob=t[j,]));
+		}
+		z <- z / rowSums(z);
+		
+		for ( i in 1:k )
+		{
+			if ( ! fixed[i] )
+			{
+				for ( j in 1:ncol(X) )
+				{
+					t[i,j] = sum( X[,j] * z[,i] ) / sum( Xsum * z[,i] );
+				}
+			}
+		}	
+				
+		for ( j in 1:k )
+		{
+			a[j] <- sum(z[,j]) / sum(z);
+		}
+		
+		
+		NewLoglik <- c();		
+		for ( j in 1:k )
+		{
+			NewLoglik <- cbind(NewLoglik, a[j] * apply(X,1,dmultinom,prob=t[j,]) );
+		}
+		NewLoglik <- sum(log(rowSums(NewLoglik)));
+
+		if ( NewLoglik - Loglik > epsilon ) 
+		{
+			Loglik <- NewLoglik;
+			Data[[I]] <- list(z=z,t=t,c=Cuts,a=a,loglik=Loglik);
+			I <- I + 1;
+		}
+		else
+		{
+			flag <- FALSE;
+		}
+	}
+
+	return(list(theta=Data[[length(Data)]]$t,loglik=Data[[length(Data)]]$loglik,BIC=0,lambda=a));
+}
+
+BuildSeqBiasBackground <- function(FastaName)
+{
+	inFA <- FastaName;
+    #:MAKE;
+	command <- paste(paste(libexecdir,"RebuildSignal.pl", sep="/"), BiasFile, inFA, ">", outSignal, sep=" ");
+	system(command);
+        signal <- read.table(outSignal);
+	M <- signal / sum(signal);
+	return(M);
+}
+
+IntersectBeds <- function( Bed1, Bed2, MinOverlap = 1, MinPercentOverlap = 0, ReturnPercentOverlap = FALSE )
+{
+	gr1 <- GRanges( Rle(Bed1[,1]), IRanges(start=Bed1[,2],end=Bed1[,3] ) );
+	gr2 <- GRanges( Rle(Bed2[,1]), IRanges(start=Bed2[,2],end=Bed2[,3] ) );
+	M <- findOverlaps(gr1,gr2, minoverlap = MinOverlap );
+	M <- as.matrix(M);
+	if ( MinPercentOverlap != 0 | ReturnPercentOverlap )
+	{
+		overlap <- rowMin( cbind( Bed1[M[,1],3], Bed2[M[,2],3] ) ) - rowMax( cbind( Bed1[M[,1],2], Bed2[M[,2],2] ) ) + 1;
+		minSize <- rowMin ( cbind ( Bed1[M[,1],3] - Bed1[M[,1],2] , Bed2[M[,2],3] - Bed2[M[,2],2] ) ) + 1;
+		percentOverlap <- overlap / minSize;
+		M <- M[which(percentOverlap >= MinPercentOverlap),];
+		if ( ReturnPercentOverlap )
+		{
+			Size1 <- Bed1[M[,1],3] - Bed1[M[,1],2] + 1;
+			Size2 <-  Bed2[M[,2],3] - Bed2[M[,2],2] + 1;
+			percentOverlap1 <- overlap / Size1;
+			percentOverlap2 <- overlap / Size2;
+		}
+	}
+	if ( ReturnPercentOverlap )
+	{
+		return(list(Int=M,PerOverlap1=percentOverlap1,PerOverlap2=percentOverlap2));
+	}	
+	else
+	{	return(M);	}
+}
+

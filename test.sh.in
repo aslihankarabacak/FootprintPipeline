@@ -1,0 +1,32 @@
+#!@GNUBASH@
+
+set -e
+set -u
+
+NAME=ATAC_HEK293_hg19_chr1.bam
+PROCESSED=.1bp.sorted.bam.CTCF.cut_matrix.
+
+export FOOTPRINT_UNINSTALLED=$PWD
+chmod +w -R ${srcdir}/test_data
+
+
+@GNUBASH@ \
+     find_footprints.sh \
+     ${srcdir}/test_data/$NAME \
+     ${srcdir}/test_data/hg19.chr1.chrom.size \
+     ${srcdir}/test_data/CTCF_motifs_hg19_chr1.bed \
+     ${srcdir}/test_data/hg19_chr1.fa \
+     CTCF \
+     ${srcdir}/SeqBias_ATAC.txt \
+     ${srcdir}/test_data/CTCF_HEK293_chip_hg19_chr1.bed \
+     2 \
+     Seq \
+     T
+
+for suffix in plot1.png plot2.png PARAM RESULTS; do
+    file="${srcdir}/test_data/${NAME}${PROCESSED}${suffix}"
+    if ! test -f ${file}; then
+        echo "ERROR: ${file} was not generated"
+        exit 1
+    fi
+done
